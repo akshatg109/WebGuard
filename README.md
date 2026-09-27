@@ -25,6 +25,9 @@ weights must be designed and documented before implementation.
 - Node.js 20.9 or newer and npm
 - Python 3.11 or newer
 
+The repository pins Python `3.12.11` for pyenv users in `.python-version`.
+Install that version with `pyenv install 3.12.11` if it is not already installed.
+
 ## Configuration
 
 Use `.env.example` as a reference and copy only the matching values into
@@ -53,13 +56,17 @@ npm run dev
 
 ```sh
 cd backend
-python -m venv .venv
+# Recreate an existing venv if it was created with a different Python version.
+python -m venv --clear .venv
 . .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --env-file .env
+python -m pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
 
-The backend health endpoint is `GET http://127.0.0.1:8000/health`.
+The backend health endpoint is `GET http://127.0.0.1:8000/health`. It does not
+require a `.env` file. To load optional backend settings locally, copy
+`backend/.env.example` to `backend/.env` and start Uvicorn with
+`--env-file .env`. Keep real credentials out of Git.
 
 ## Checks
 

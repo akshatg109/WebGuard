@@ -28,6 +28,8 @@ Frontend:
 
 Backend:
 - Python
+- Development interpreter pinned to Python 3.12.11 via root `.python-version`;
+  backend supports Python 3.11+
 - FastAPI
 - Pinned `supabase-py` async client for server-side persistence
 
