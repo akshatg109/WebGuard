@@ -8,6 +8,7 @@ from app.scanner.checks.registry import (
     CheckRegistry,
     run_security_checks,
 )
+from app.scanner.technologies import Technology, TechnologyCategory, TechnologyConfidence
 
 __all__ = [
     "DEFAULT_CHECKS",
@@ -16,4 +17,7 @@ __all__ = [
     "CheckEngine",
     "CheckRegistry",
     "run_security_checks",
+    "Technology",
+    "TechnologyCategory",
+    "TechnologyConfidence",
 ]

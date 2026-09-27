@@ -15,11 +15,14 @@ from app.scanner.checks.header_checks import (
     ServerInformationExposureCheck,
     XContentTypeOptionsCheck,
 )
+from app.scanner.checks.cookies import CookieSecurityCheck
+from app.scanner.checks.content import MixedContentCheck
 from app.scanner.checks.transport import (
     FinalUrlSchemeCheck,
     HttpsAvailabilityCheck,
     HttpToHttpsRedirectCheck,
 )
+from app.scanner.checks.technology import TechnologyDetectionCheck
 from app.scanner.errors import ScannerErrorCode
 from app.scanner.findings import Finding, FindingStatus, Severity, affected_url_for_context
 from app.scanner.models import ScanContext
@@ -35,6 +38,9 @@ DEFAULT_CHECKS: tuple[SecurityCheck, ...] = (
     PermissionsPolicyCheck(),
     FrameProtectionCheck(),
     ServerInformationExposureCheck(),
+    CookieSecurityCheck(),
+    MixedContentCheck(),
+    TechnologyDetectionCheck(),
 )
 _CHECK_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.]*$")
 
