@@ -1,0 +1,66 @@
+# WebGuard private staging topology. This Blueprint is configuration only;
+# deploying it still requires operator-supplied staging Supabase settings.
+envVarGroups:
+  - name: webguard-staging-scanner-auth
+    envVars:
+      - key: SCANNER_API_TOKEN
+        generateValue: true
+
+services:
+  - type: pserv
+    runtime: python
+    name: webguard-staging-scanner
+    region: singapore
+    plan: 0.5c-512mb
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: PORT
+        value: 10000
+      - fromGroup: webguard-staging-scanner-auth
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: SCAN_RATE_LIMIT_MAX_REQUESTS
+        value: "5"
+      - key: SCAN_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+      - key: SCANNER_ALLOWED_SCHEMES
+        value: http,https
+      - key: SCANNER_ALLOWED_PORTS
+        value: 80,443,8080,8443
+      - key: SCANNER_OVERALL_TIMEOUT_SECONDS
+        value: "30"
+
+  - type: web
+    runtime: node
+    name: webguard-staging-web
+    region: singapore
+    plan: 0.5c-512mb
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: NODE_ENV=production npm run start -- --hostname 0.0.0.0 --port $PORT
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - fromGroup: webguard-staging-scanner-auth
+      - key: SCANNER_API_PRIVATE_HOSTPORT
+        fromService:
+          name: webguard-staging-scanner
+          type: pserv
+          property: hostport
