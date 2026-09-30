@@ -22,8 +22,15 @@ export async function signUpAction(formData: FormData) {
     return { status: "error" as const, message: parsed.error.issues[0]?.message ?? "Check your details." };
   }
 
+  const siteUrl = getSiteUrl();
+  if (!siteUrl) {
+    return {
+      status: "error" as const,
+      message: "Signup is temporarily unavailable. Please try again shortly.",
+    };
+  }
+
   const supabase = await createClient();
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   // Use one response for success and failure to avoid email account enumeration.
   const { error } = await supabase.auth.signUp({
     ...parsed.data,
@@ -52,6 +59,34 @@ export async function signUpAction(formData: FormData) {
   }
 
   return genericSignupSuccess();
+}
+
+function getSiteUrl(): string | null {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (!configured) {
+    return process.env.NODE_ENV === "production" ? null : "http://localhost:3000";
+  }
+
+  try {
+    const url = new URL(configured);
+    const isLocalHost = ["localhost", "127.0.0.1", "[::1]"].includes(
+      url.hostname.toLowerCase(),
+    );
+    if (
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash ||
+      (url.protocol !== "https:" &&
+        !(process.env.NODE_ENV !== "production" && url.protocol === "http:" && isLocalHost))
+    ) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function genericSignupSuccess() {

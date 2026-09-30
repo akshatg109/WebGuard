@@ -5,6 +5,29 @@ export function hasSupabasePublicConfig() {
   return Boolean(
     supabaseUrl &&
       publishableKey &&
-      !publishableKey.endsWith("replace_me"),
+      !publishableKey.endsWith("replace_me") &&
+      isAllowedSupabaseUrl(supabaseUrl),
   );
+}
+
+function isAllowedSupabaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const isLocalHost = ["localhost", "127.0.0.1", "[::1]"].includes(
+      url.hostname.toLowerCase(),
+    );
+    const localDevelopmentHttp =
+      process.env.NODE_ENV !== "production" &&
+      url.protocol === "http:" &&
+      isLocalHost;
+    return (
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      (url.protocol === "https:" || localDevelopmentHttp)
+    );
+  } catch {
+    return false;
+  }
 }

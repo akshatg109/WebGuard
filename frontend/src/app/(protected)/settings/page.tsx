@@ -28,7 +28,7 @@ export default async function SettingsPage() {
 
         <div className="min-w-0 space-y-4">
           <SettingsSection
-            description="Your authenticated account details. Profile editing is not available in this preview."
+            description="Your authenticated account details. Profile editing is not available in this version."
             icon={UserRound}
             id="profile"
             title="Profile"
@@ -75,7 +75,7 @@ export default async function SettingsPage() {
           </SettingsSection>
 
           <Card className="border-border/60 bg-background/20 p-4 text-xs leading-5 text-muted-foreground sm:p-5">
-            Settings are limited to account and session details during the UI preview. No profile changes or account deletions are available here.
+            Settings are limited to account and session details in this version. No profile changes or account deletions are available here.
           </Card>
         </div>
       </div>

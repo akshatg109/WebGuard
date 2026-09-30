@@ -5,10 +5,14 @@ export function MetricCard({
   label,
   icon: Icon,
   tone,
+  value,
+  detail,
 }: {
   label: string;
   icon: LucideIcon;
   tone: "critical" | "high" | "medium" | "low" | "neutral";
+  value: string;
+  detail: string;
 }) {
   const toneClasses = {
     critical: "text-severity-critical",
@@ -27,8 +31,8 @@ export function MetricCard({
         </span>
         <div className="min-w-0">
           <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
-          <p className="mt-1 text-xl leading-none font-semibold tabular-nums tracking-tight text-foreground">—</p>
-          <p className="mt-1.5 text-[10px] text-muted-foreground/80">No scan data connected</p>
+          <p className="mt-1 text-xl leading-none font-semibold tabular-nums tracking-tight text-foreground">{value}</p>
+          <p className="mt-1.5 text-[10px] text-muted-foreground/80">{detail}</p>
         </div>
       </CardContent>
     </Card>

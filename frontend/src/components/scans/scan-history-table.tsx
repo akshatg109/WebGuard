@@ -20,30 +20,31 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { ScanListItem } from "@/data/scan-preview";
+import type { ScanSummary } from "@/lib/scanner/types";
 
-export function ScanHistoryTable({ data }: { data: ScanListItem[] }) {
-  const [sorting, setSorting] = useState<SortingState>([{ id: "createdAt", desc: true }]);
+export function ScanHistoryTable({ data }: { data: ScanSummary[] }) {
+  const [sorting, setSorting] = useState<SortingState>([{ id: "created_at", desc: true }]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const filteredData = useMemo(
     () => statusFilter === "all" ? data : data.filter((scan) => scan.status === statusFilter),
     [data, statusFilter],
   );
-  const columns = useMemo<ColumnDef<ScanListItem>[]>(() => [
+  const columns = useMemo<ColumnDef<ScanSummary>[]>(() => [
     {
-      accessorKey: "targetUrl",
+      accessorKey: "target_url",
       header: ({ column }) => <SortableHeader column={column} label="Target" />,
       cell: ({ row }) => (
-        <span className="block max-w-[240px] truncate font-mono text-xs text-foreground" title={row.original.targetUrl}>
-          {row.original.targetUrl}
+        <span className="block max-w-[240px] truncate font-mono text-xs text-foreground" title={row.original.target_url}>
+          {row.original.target_url}
         </span>
       ),
     },
     {
-      accessorKey: "createdAt",
+      id: "created_at",
+      accessorFn: (scan) => scan.completed_at ?? scan.created_at,
       header: ({ column }) => <SortableHeader column={column} label="Scan date" />,
-      cell: ({ row }) => <span className="text-xs text-muted-foreground">{formatDate(row.original.createdAt)}</span>,
+      cell: ({ row }) => <span className="text-xs text-muted-foreground">{formatDate(row.original.completed_at ?? row.original.created_at)}</span>,
     },
     {
       accessorKey: "status",
@@ -53,19 +54,28 @@ export function ScanHistoryTable({ data }: { data: ScanListItem[] }) {
     {
       accessorKey: "score",
       header: ({ column }) => <SortableHeader column={column} label="Score" align="right" />,
-      cell: ({ row }) => <span className="block text-right font-mono text-xs tabular-nums text-muted-foreground">{row.original.score ?? "—"}</span>,
+      cell: ({ row }) => (
+        <span className="block text-right">
+          <span className="block font-mono text-xs tabular-nums text-muted-foreground">
+            {row.original.score_available && row.original.score !== null ? row.original.score : "Unavailable"}
+          </span>
+          <span className="mt-1 block text-[10px] text-muted-foreground/80">
+            {row.original.confidence ? `${row.original.confidence} confidence` : "No score"}
+          </span>
+        </span>
+      ),
     },
     {
-      accessorKey: "findingCount",
+      accessorKey: "finding_count",
       header: ({ column }) => <SortableHeader column={column} label="Findings" align="right" />,
-      cell: ({ row }) => <span className="block text-right font-mono text-xs tabular-nums text-muted-foreground">{row.original.findingCount ?? "—"}</span>,
+      cell: ({ row }) => <span className="block text-right font-mono text-xs tabular-nums text-muted-foreground">{row.original.finding_count ?? "—"}</span>,
     },
     {
       id: "action",
       header: () => <span className="sr-only">Actions</span>,
       enableSorting: false,
       cell: ({ row }) => (
-        <Button aria-label={`View report for ${row.original.targetUrl}`} render={<Link href={`/scans/${row.original.id}`} />} size="icon-sm" variant="ghost">
+        <Button aria-label={`View report for ${row.original.target_url}`} render={<Link href={`/scans/${row.original.id}`} />} size="icon-sm" variant="ghost">
           <ExternalLink aria-hidden="true" />
         </Button>
       ),
@@ -113,6 +123,7 @@ export function ScanHistoryTable({ data }: { data: ScanListItem[] }) {
             >
               <option value="all">All statuses</option>
               <option value="completed">Completed</option>
+              <option value="pending">Pending</option>
               <option value="running">Running</option>
               <option value="failed">Failed</option>
             </select>
@@ -125,7 +136,7 @@ export function ScanHistoryTable({ data }: { data: ScanListItem[] }) {
               compact
               description={globalFilter || statusFilter !== "all"
                 ? "No scan rows match these filters. Clear the filters to see the current scan history."
-                : "No live scan records are connected to this preview. This table will show your own scan history when the API is integrated."}
+                : "Run your first scan of a website you own or are authorized to assess. Your completed and failed scans will appear here."}
               title={globalFilter || statusFilter !== "all" ? "No matching scans" : "No scan history yet"}
               action={(globalFilter || statusFilter !== "all") ? (
                 <Button onClick={() => { setGlobalFilter(""); setStatusFilter("all"); }} size="sm" variant="outline">Clear filters</Button>
@@ -145,7 +156,7 @@ export function ScanHistoryTable({ data }: { data: ScanListItem[] }) {
                         return (
                           <TableHead
                             aria-sort={order ? order === "asc" ? "ascending" : "descending" : "none"}
-                            className={header.id === "score" || header.id === "findingCount" ? "text-right" : undefined}
+                            className={header.id === "score" || header.id === "finding_count" ? "text-right" : undefined}
                             key={header.id}
                           >
                             {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
@@ -168,14 +179,14 @@ export function ScanHistoryTable({ data }: { data: ScanListItem[] }) {
               {table.getRowModel().rows.map((row) => (
                 <article className="rounded-lg border border-border/70 bg-background/25 p-4" key={row.id}>
                   <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 break-all font-mono text-xs text-foreground">{row.original.targetUrl}</span>
+                    <span className="min-w-0 break-all font-mono text-xs text-foreground">{row.original.target_url}</span>
                     <ScanStatusBadge status={row.original.status} />
                   </div>
-                  <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>{formatDate(row.original.createdAt)}</span>
-                    <span>Score {row.original.score ?? "—"}</span>
-                    <span>Findings {row.original.findingCount ?? "—"}</span>
-                    <Button aria-label={`View report for ${row.original.targetUrl}`} render={<Link href={`/scans/${row.original.id}`} />} size="icon-sm" variant="ghost">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-[11px] text-muted-foreground">
+                    <span className="basis-full">{formatDate(row.original.completed_at ?? row.original.created_at)}</span>
+                    <span>{row.original.score_available && row.original.score !== null ? `Score ${row.original.score}` : "No score"}</span>
+                    <span>Findings {row.original.finding_count ?? "—"}</span>
+                    <Button aria-label={`View report for ${row.original.target_url}`} render={<Link href={`/scans/${row.original.id}`} />} size="icon-sm" variant="ghost">
                       <ExternalLink aria-hidden="true" />
                     </Button>
                   </div>
@@ -208,7 +219,7 @@ function SortableHeader({
   label,
   align = "left",
 }: {
-  column: Column<ScanListItem, unknown>;
+  column: Column<ScanSummary, unknown>;
   label: string;
   align?: "left" | "right";
 }) {
@@ -226,7 +237,8 @@ function SortableHeader({
   );
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(date);
 }

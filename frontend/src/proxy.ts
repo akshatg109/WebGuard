@@ -1,12 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { hasSupabasePublicConfig } from "@/lib/supabase/config";
 
 export async function proxy(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabasePublishableKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  if (!supabaseUrl || !supabasePublishableKey) {
+  if (!supabaseUrl || !supabasePublishableKey || !hasSupabasePublicConfig()) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("error", "auth_unavailable");
     return NextResponse.redirect(loginUrl);

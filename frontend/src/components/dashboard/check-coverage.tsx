@@ -1,5 +1,4 @@
 import { Cookie, FileCheck2, Globe2, LockKeyhole } from "lucide-react";
-import { ScanStatusBadge } from "@/components/shared/scan-status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const checkGroups = [
@@ -13,7 +12,7 @@ export function CheckCoverage() {
   return (
     <Card className="border-border/70 bg-card/80 shadow-none">
       <CardHeader>
-        <p className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Planned checks</p>
+          <p className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Scanner scope</p>
         <CardTitle className="mt-1.5 text-base">What WebGuard reviews</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-2 px-4 pb-4 sm:grid-cols-2 sm:px-5 sm:pb-5">
@@ -26,7 +25,7 @@ export function CheckCoverage() {
               <p className="truncate text-xs font-medium text-foreground">{label}</p>
               <p className="mt-1 truncate text-[10px] text-muted-foreground">{detail}</p>
             </div>
-            <ScanStatusBadge status="not-run" />
+            <span className="shrink-0 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground">Passive</span>
           </div>
         ))}
       </CardContent>

@@ -4,8 +4,8 @@ export function DashboardSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading dashboard" className="space-y-6" role="status">
       <div className="space-y-3"><Skeleton className="h-8 w-56" /><Skeleton className="h-4 w-80 max-w-full" /></div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => <Skeleton className="h-28 rounded-xl" key={index} />)}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }, (_, index) => <Skeleton className="h-28 rounded-xl" key={index} />)}
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.1fr_1.9fr]">
         <Skeleton className="h-64 rounded-xl" />
