@@ -34,12 +34,12 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
 class ScannerService:
-    """Safe HTTP collection primitive; no checks, persistence, or public route.
+    """Safe HTTP collection primitive; no checks, persistence, or auth itself.
 
-    This internal service does not authenticate callers. Any future route must
-    verify the user's session, enforce authorization/rate limits, and only then
-    call this service. Keep an app-scoped instance so its concurrency semaphore
-    is shared across requests. Phase 4A intentionally mounts no such route.
+    The Phase 4F API verifies the Supabase user, validates and rate-limits the
+    request, then calls this service. Keep an app-scoped instance so its
+    concurrency semaphore is shared across requests; every redirect continues
+    through the same pinned-address validation path.
     """
 
     def __init__(

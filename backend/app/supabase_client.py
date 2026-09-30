@@ -1,4 +1,4 @@
-"""Factory for a privileged Supabase client used only by server code."""
+"""Factory for a privileged Supabase client used only by backend code."""
 
 from supabase import AsyncClient, create_async_client
 
