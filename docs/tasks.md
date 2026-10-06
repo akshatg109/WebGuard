@@ -268,6 +268,7 @@ production scanning.
 - [ ] Findings endpoint
 - [x] Database persistence
 - [x] Stable API error format
+- [x] Safe diagnostics for scan-history persistence failures
 - [x] Rate limiting (process-local MVP; global deployment limit remains)
 - [ ] Request logging without secrets
 
@@ -352,6 +353,11 @@ Note: PDF export is explicitly out of scope for MVP and remains a later-phase fe
 - [ ] Record short demo video
 
 ## Current Focus
+
+The local scan-history 503 is under diagnosis: the authenticated repository
+smoke test succeeds with `backend/.env` loaded, and the API now logs redacted
+PostgREST diagnostics on history-read failures. Reproduce the failure against
+the running backend before treating the local issue as resolved.
 
 Phase 4I private Render staging preparation is complete: `render.yaml` defines a
 Render Next.js web service and a FastAPI Private Service, and production BFF

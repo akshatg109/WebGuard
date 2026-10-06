@@ -95,14 +95,14 @@ cd backend
 python -m venv --clear .venv
 . .venv/bin/activate  # Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt pytest
-uvicorn app.main:app --reload
+# cp .env.example .env, then populate it before starting authenticated APIs.
+uvicorn app.main:app --reload --env-file .env
 ```
 
 The backend health endpoint is `GET http://127.0.0.1:8000/health`. It returns
-only `{"status":"ok"}` and does not
-require a `.env` file. To load optional backend settings locally, copy
-`backend/.env.example` to `backend/.env` and start Uvicorn with
-`--env-file .env`. Keep real credentials out of Git.
+only `{"status":"ok"}` and does not require a `.env` file. Uvicorn does not
+load `.env` automatically; the `--env-file .env` option is required for local
+Supabase, scanner-token, and AI settings. Keep real credentials out of Git.
 
 Configure `SCANNER_API_URL=http://127.0.0.1:8000` in `frontend/.env.local` for
 local scanner requests. The browser calls same-origin Next.js routes; it does
