@@ -354,10 +354,11 @@ Note: PDF export is explicitly out of scope for MVP and remains a later-phase fe
 
 ## Current Focus
 
-The local scan-history 503 is under diagnosis: the authenticated repository
-smoke test succeeds with `backend/.env` loaded, and the API now logs redacted
-PostgREST diagnostics on history-read failures. Reproduce the failure against
-the running backend before treating the local issue as resolved.
+The local scan-history GET now returns 200 with Uvicorn loading `backend/.env`.
+Scan creation POSTs still return 503; the API now logs redacted PostgREST
+diagnostics for persistence stages so the failing stage can be identified on
+the next authorized scan attempt. Supabase schema, service-role insert grant,
+and status constraint were verified read-only; no scan data was created or read.
 
 Phase 4I private Render staging preparation is complete: `render.yaml` defines a
 Render Next.js web service and a FastAPI Private Service, and production BFF
