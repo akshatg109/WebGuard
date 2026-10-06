@@ -376,6 +376,42 @@ class ScanApiTests(unittest.TestCase):
         self.assertNotIn("private diagnostic detail", log_output)
         self.assertNotIn("score_confidence", response.text)
 
+    def test_scan_creation_logs_safe_pending_insert_failure_diagnostics(self) -> None:
+        class BrokenCreateRepository(FakeRepository):
+            async def create_pending(self, user_id: str, target_url: str):
+                raise PostgrestAPIError(
+                    {
+                        "code": "42501",
+                        "message": (
+                            "permission denied for table scans; "
+                            "DB_PASSWORD=local-diagnostic-password; "
+                            "postgresql://user:private@db.example.test/service"
+                        ),
+                        "details": "private insert detail must not be logged",
+                    }
+                )
+
+        with build_client(repository=BrokenCreateRepository()) as client:
+            with self.assertLogs("app.api.scans", level="ERROR") as diagnostics:
+                response = client.post(
+                    "/api/scans",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={"url": VALID_URL},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"]["code"], "persistence_failure")
+        log_output = "\n".join(diagnostics.output)
+        self.assertIn("operation=create_pending", log_output)
+        self.assertIn("exception_type=APIError", log_output)
+        self.assertIn("42501", log_output)
+        self.assertIn("permission denied for table scans", log_output)
+        self.assertIn("DB_PASSWORD=[redacted]", log_output)
+        self.assertIn("[redacted-database-url]", log_output)
+        self.assertNotIn("local-diagnostic-password", log_output)
+        self.assertNotIn("private@db.example.test", log_output)
+        self.assertNotIn("private insert detail", log_output)
+
     def test_scan_routes_require_the_server_only_service_credential(self) -> None:
         with build_client() as client:
             missing = client.post(

@@ -61,8 +61,10 @@ _API_KEY = re.compile(
     r"(?i)\b(?:sb_secret_|sb_publishable_|sbp_|sk-or-v1-|sk-)[A-Za-z0-9_-]{16,}"
 )
 _URL = re.compile(r"(?i)\bhttps?://[^\s,;]+")
+_DATABASE_URL = re.compile(r"(?i)\bpostgres(?:ql)?://[^\s,;]+")
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)\b(authorization|cookie|set-cookie|api[_-]?key|secret[_-]?key|"
+    r"(?i)\b(authorization|cookie|set-cookie|api[_-]?key|(?:db[_-]?)?password|"
+    r"passwd|pwd|secret(?:[_-]?key)?|client[_-]?secret|private[_-]?key|"
     r"access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*[^\s,;]+"
 )
 
@@ -95,7 +97,7 @@ async def list_scans(
     try:
         result = await repository.list_owned_summaries(user.id, limit=limit, offset=offset)
     except Exception as exc:
-        _log_scan_history_failure(exc)
+        _log_persistence_failure("list_owned_summaries", exc)
         raise ApiError(503, "persistence_failure", "Scan history is temporarily unavailable.") from None
 
     items = [
@@ -131,7 +133,7 @@ async def list_scans(
     )
 
 
-def _log_scan_history_failure(error: Exception) -> None:
+def _log_persistence_failure(operation: str, error: Exception) -> None:
     """Log repository diagnostics without request or credential data."""
     status: int | str = "unavailable"
     for attribute in ("status_code", "status"):
@@ -167,8 +169,9 @@ def _log_scan_history_failure(error: Exception) -> None:
     message = _safe_diagnostic_text(raw_message) if isinstance(raw_message, str) else ""
 
     _LOGGER.error(
-        "Scan history persistence failed "
-        "(exception_type=%s, upstream_status=%s, database_code=%s, message=%s)",
+        "Scan persistence failed "
+        "(operation=%s, exception_type=%s, upstream_status=%s, database_code=%s, message=%s)",
+        operation,
         type(error).__name__,
         status,
         code,
@@ -183,6 +186,7 @@ def _safe_diagnostic_text(value: str) -> str:
     text = _API_KEY.sub("[redacted-key]", text)
     text = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", text)
     text = _URL.sub("[redacted-url]", text)
+    text = _DATABASE_URL.sub("[redacted-database-url]", text)
     return " ".join(text.split())[:240]
 
 
@@ -232,13 +236,15 @@ async def create_scan(
     try:
         scan_row = await repository.create_pending(user.id, display_url)
         scan_id = str(UUID(str(scan_row["id"])))
-    except Exception:
+    except Exception as exc:
+        _log_persistence_failure("create_pending", exc)
         raise ApiError(503, "persistence_failure", "The scan could not be started right now.") from None
 
     started = time.monotonic()
     try:
         await repository.mark_running(scan_id, user.id, target.normalized_url)
-    except Exception:
+    except Exception as exc:
+        _log_persistence_failure("mark_running", exc)
         return await _persist_failure_response(
             repository,
             scan_id,
@@ -316,7 +322,8 @@ async def create_scan(
             findings=findings,
             score=score,
         )
-    except Exception:
+    except Exception as exc:
+        _log_persistence_failure("persist_completed", exc)
         # The restricted RPC is atomic; a persistence error cannot publish a
         # partially written result or falsely claim completion.
         return await _persist_failure_response(
@@ -365,9 +372,10 @@ async def _persist_failure_response(
             message=message,
             started=started,
         )
-    except Exception:
-        # The original failure is intentionally not logged or returned. The row
-        # can remain pending/running only if Supabase itself is unreachable.
+    except Exception as exc:
+        _log_persistence_failure("mark_failed", exc)
+        # The original failure remains out of the API response. The row can
+        # remain pending/running only if Supabase itself is unreachable.
         pass
     return JSONResponse(
         status_code=500,
@@ -418,7 +426,8 @@ async def _failure_response(
             message=message,
             started=started,
         )
-    except Exception:
+    except Exception as exc:
+        _log_persistence_failure("mark_failed_after_scan_error", exc)
         return await _persist_failure_response(
             repository, scan_id, user_id, target_url, started
         )
