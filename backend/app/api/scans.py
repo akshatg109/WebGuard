@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -11,6 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from postgrest.exceptions import APIError as PostgrestAPIError
 
 from app.api.ai import cached_ai_response
 from app.api.auth import AuthenticatedUser, get_authenticated_user
@@ -50,6 +53,19 @@ router = APIRouter(
     },
 )
 
+_LOGGER = logging.getLogger(__name__)
+_SAFE_DATABASE_ERROR_CODE = re.compile(r"(?:[0-9A-Z]{5}|PGRST[0-9]{3})")
+_BEARER_TOKEN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+_API_KEY = re.compile(
+    r"(?i)\b(?:sb_secret_|sb_publishable_|sbp_|sk-or-v1-|sk-)[A-Za-z0-9_-]{16,}"
+)
+_URL = re.compile(r"(?i)\bhttps?://[^\s,;]+")
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)\b(authorization|cookie|set-cookie|api[_-]?key|secret[_-]?key|"
+    r"access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*[^\s,;]+"
+)
+
 _SCANNER_FAILURES: dict[ScannerErrorCode, tuple[int, str]] = {
     ScannerErrorCode.BLOCKED_DESTINATION: (422, "blocked_target"),
     ScannerErrorCode.UNSAFE_REDIRECT: (422, "blocked_target"),
@@ -78,7 +94,8 @@ async def list_scans(
     repository: ScanRepository = request.app.state.scan_repository
     try:
         result = await repository.list_owned_summaries(user.id, limit=limit, offset=offset)
-    except Exception:
+    except Exception as exc:
+        _log_scan_history_failure(exc)
         raise ApiError(503, "persistence_failure", "Scan history is temporarily unavailable.") from None
 
     items = [
@@ -112,6 +129,61 @@ async def list_scans(
         limit=limit,
         offset=offset,
     )
+
+
+def _log_scan_history_failure(error: Exception) -> None:
+    """Log repository diagnostics without request or credential data."""
+    status: int | str = "unavailable"
+    for attribute in ("status_code", "status"):
+        try:
+            candidate = getattr(error, attribute, None)
+        except Exception:
+            continue
+        if type(candidate) is int and 100 <= candidate <= 599:
+            status = candidate
+            break
+    if status == "unavailable":
+        try:
+            response = getattr(error, "response", None)
+            candidate = getattr(response, "status_code", None)
+        except Exception:
+            candidate = None
+        if type(candidate) is int and 100 <= candidate <= 599:
+            status = candidate
+
+    try:
+        raw_code = getattr(error, "code", None)
+    except Exception:
+        raw_code = None
+    code = (
+        raw_code
+        if isinstance(raw_code, str) and _SAFE_DATABASE_ERROR_CODE.fullmatch(raw_code)
+        else "unavailable"
+    )
+
+    # Keep generic exception details useful for local diagnosis, but never log
+    # PostgREST details/hints or an unfiltered exception string.
+    raw_message = error.message if isinstance(error, PostgrestAPIError) else str(error)
+    message = _safe_diagnostic_text(raw_message) if isinstance(raw_message, str) else ""
+
+    _LOGGER.error(
+        "Scan history persistence failed "
+        "(exception_type=%s, upstream_status=%s, database_code=%s, message=%s)",
+        type(error).__name__,
+        status,
+        code,
+        message or "unavailable",
+    )
+
+
+def _safe_diagnostic_text(value: str) -> str:
+    """Redact common credential formats before a database message enters logs."""
+    text = _BEARER_TOKEN.sub("Bearer [redacted]", value)
+    text = _JWT.sub("[redacted-token]", text)
+    text = _API_KEY.sub("[redacted-key]", text)
+    text = _SENSITIVE_ASSIGNMENT.sub(r"\1=[redacted]", text)
+    text = _URL.sub("[redacted-url]", text)
+    return " ".join(text.split())[:240]
 
 
 @router.post(

@@ -6,6 +6,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from postgrest.exceptions import APIError as PostgrestAPIError
 
 from app.api.auth import AuthenticatedUser, SupabaseTokenVerifier
 from app.api.errors import ApiError
@@ -336,6 +337,44 @@ class ScanApiTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["finding_count"], 1)
         self.assertEqual(result["items"][0]["severity_counts"]["high"], 1)
         self.assertNotIn("other.example.com", response.text)
+
+    def test_scan_history_logs_safe_postgrest_failure_diagnostics(self) -> None:
+        class BrokenRepository(FakeRepository):
+            async def list_owned_summaries(self, user_id: str, *, limit: int, offset: int):
+                raise PostgrestAPIError(
+                    {
+                        "code": "42703",
+                        "message": (
+                            "column public.scans.score_confidence does not exist; "
+                            "Bearer local-diagnostic-token; "
+                            "sb_secret_abcdefghijklmnop; "
+                            "Cookie=local-cookie-value; "
+                            "Authorization=local-authorization-value"
+                        ),
+                        "details": "private diagnostic detail must not be logged",
+                    }
+                )
+
+        with build_client(repository=BrokenRepository()) as client:
+            with self.assertLogs("app.api.scans", level="ERROR") as diagnostics:
+                response = client.get(
+                    "/api/scans",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"]["code"], "persistence_failure")
+        log_output = "\n".join(diagnostics.output)
+        self.assertIn("exception_type=APIError", log_output)
+        self.assertIn("42703", log_output)
+        self.assertIn("column public.scans.score_confidence does not exist", log_output)
+        self.assertIn("Bearer [redacted]", log_output)
+        self.assertNotIn("local-diagnostic-token", log_output)
+        self.assertNotIn("sb_secret_abcdefghijklmnop", log_output)
+        self.assertNotIn("local-cookie-value", log_output)
+        self.assertNotIn("local-authorization-value", log_output)
+        self.assertNotIn("private diagnostic detail", log_output)
+        self.assertNotIn("score_confidence", response.text)
 
     def test_scan_routes_require_the_server_only_service_credential(self) -> None:
         with build_client() as client:
