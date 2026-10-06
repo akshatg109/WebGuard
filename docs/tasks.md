@@ -354,11 +354,23 @@ Note: PDF export is explicitly out of scope for MVP and remains a later-phase fe
 
 ## Current Focus
 
-The local scan-history GET now returns 200 with Uvicorn loading `backend/.env`.
-Scan creation POSTs still return 503; the API now logs redacted PostgREST
-diagnostics for persistence stages so the failing stage can be identified on
-the next authorized scan attempt. Supabase schema, service-role insert grant,
-and status constraint were verified read-only; no scan data was created or read.
+The local machine clock is NTP-synchronized. The BFF verifies the user's current
+Supabase session and FastAPI verifies that access token with Supabase Auth; the
+PostgREST persistence client separately uses the configured server-only
+`sb_secret_` key, so `PGRST303: JWT issued at future` on scan history/persistence
+is not caused by forwarding a stale browser token. This matches a reported
+intermittent Supabase gateway/PostgREST clock-skew failure for secret-key REST
+requests. The scan repository now retries only that exact PGRST303 message, at
+most twice (300 ms and 900 ms); other auth/database errors are not retried.
+The `create_pending` AttributeError was traced to calling `.single()` on the
+builder returned by `insert().select()`. With the installed `supabase==2.31.0` /
+`postgrest==2.31.0`, that chain is an `AsyncQueryRequestBuilder`, which has no
+`.single()` method; `.execute()` instead returns an `APIResponse` whose `data`
+is a list. The repository now validates and returns its single inserted row from
+that list. Regression coverage uses the installed builder/response types and
+exercises the authenticated create → scanner → completion → history API flow.
+Persistence diagnostics include safe source locations. No schema, RLS,
+ownership, credentials, or rate-limit changes were made.
 
 Phase 4I private Render staging preparation is complete: `render.yaml` defines a
 Render Next.js web service and a FastAPI Private Service, and production BFF
