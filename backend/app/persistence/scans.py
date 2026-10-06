@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -14,6 +15,7 @@ from app.api.serialization import (
     score_persistence_fields,
     technology_persistence_rows,
 )
+from app.persistence.retry import execute_with_clock_skew_retry
 from app.scanner.findings import Finding
 from app.scanner.scoring import ScoreResult
 
@@ -68,7 +70,7 @@ class SupabaseScanRepository:
 
     async def create_pending(self, user_id: str, target_url: str) -> Mapping[str, Any]:
         client = self._require_client()
-        response = await (
+        query = (
             client.table("scans")
             .insert(
                 {
@@ -80,16 +82,23 @@ class SupabaseScanRepository:
                 }
             )
             .select("id,user_id,target_url,status,created_at")
-            .single()
-            .execute()
         )
-        if not isinstance(response.data, Mapping):
+        response = await execute_with_clock_skew_retry(query.execute)
+        # In supabase-py, insert().select() remains an AsyncQueryRequestBuilder;
+        # its execute() returns APIResponse.data as a list. `.single()` belongs
+        # to AsyncSelectRequestBuilder and is not available on this mutation chain.
+        rows = response.data
+        if (
+            not isinstance(rows, list)
+            or len(rows) != 1
+            or not isinstance(rows[0], Mapping)
+        ):
             raise RuntimeError("Scan creation returned no row.")
-        return response.data
+        return rows[0]
 
     async def mark_running(self, scan_id: str, user_id: str, normalized_url: str) -> None:
         client = self._require_client()
-        response = await (
+        query = (
             client.table("scans")
             .update(
                 {
@@ -102,8 +111,8 @@ class SupabaseScanRepository:
             .eq("user_id", str(UUID(user_id)))
             .eq("status", "pending")
             .select("id")
-            .execute()
         )
+        response = await execute_with_clock_skew_retry(query.execute)
         if not response.data:
             raise RuntimeError("Scan lifecycle update returned no row.")
 
@@ -137,7 +146,8 @@ class SupabaseScanRepository:
         # This restricted Postgres RPC inserts children and changes state to
         # completed in one transaction. A failure leaves the scan running so the
         # caller can safely mark it failed without publishing partial results.
-        await client.rpc("persist_completed_scan", params).execute()
+        query = client.rpc("persist_completed_scan", params)
+        await execute_with_clock_skew_retry(query.execute)
 
     async def mark_failed(
         self,
@@ -149,7 +159,7 @@ class SupabaseScanRepository:
         duration_ms: int,
     ) -> None:
         client = self._require_client()
-        response = await (
+        query = (
             client.table("scans")
             .update(
                 {
@@ -169,8 +179,8 @@ class SupabaseScanRepository:
             .eq("user_id", str(UUID(user_id)))
             .neq("status", "completed")
             .select("id")
-            .execute()
         )
+        response = await execute_with_clock_skew_retry(query.execute)
         if not response.data:
             raise RuntimeError("Scan failure state was not persisted.")
 
@@ -178,14 +188,14 @@ class SupabaseScanRepository:
         client = self._require_client()
         canonical_scan_id = str(UUID(scan_id))
         canonical_user_id = str(UUID(user_id))
-        scan_response = await (
+        query = (
             client.table("scans")
             .select("*")
             .eq("id", canonical_scan_id)
             .eq("user_id", canonical_user_id)
             .limit(1)
-            .execute()
         )
+        scan_response = await execute_with_clock_skew_retry(query.execute)
         scan_rows = scan_response.data or []
         if not scan_rows:
             return None
@@ -209,7 +219,7 @@ class SupabaseScanRepository:
         """Return a bounded list of summaries after applying the verified owner filter."""
         client = self._require_client()
         canonical_user_id = str(UUID(user_id))
-        response = await (
+        query = (
             client.table("scans")
             .select(
                 "id,target_url,normalized_url,status,score,score_available,score_confidence,"
@@ -219,20 +229,20 @@ class SupabaseScanRepository:
             .eq("user_id", canonical_user_id)
             .order("created_at", desc=True)
             .range(offset, offset + limit - 1)
-            .execute()
         )
+        response = await execute_with_clock_skew_retry(query.execute)
         scans = response.data or []
         scan_ids = [str(UUID(str(row["id"]))) for row in scans]
         findings_by_scan: dict[str, list[Mapping[str, Any]]] = {
             scan_id: [] for scan_id in scan_ids
         }
         if scan_ids:
-            finding_response = await (
+            query = (
                 client.table("findings")
                 .select("scan_id,severity,status")
                 .in_("scan_id", scan_ids)
-                .execute()
             )
+            finding_response = await execute_with_clock_skew_retry(query.execute)
             for finding in finding_response.data or []:
                 scan_id = str(finding.get("scan_id", ""))
                 if scan_id in findings_by_scan:
@@ -278,12 +288,28 @@ class SupabaseScanRepository:
 
 
 async def _execute_children(client: Any, scan_id: str) -> tuple[Any, Any, Any]:
-    import asyncio
-
     return tuple(
         await asyncio.gather(
-            client.table("findings").select("*").eq("scan_id", scan_id).order("created_at").execute(),
-            client.table("technologies").select("*").eq("scan_id", scan_id).order("created_at").execute(),
-            client.table("scan_check_results").select("*").eq("scan_id", scan_id).order("created_at").execute(),
+            execute_with_clock_skew_retry(
+                client.table("findings")
+                .select("*")
+                .eq("scan_id", scan_id)
+                .order("created_at")
+                .execute
+            ),
+            execute_with_clock_skew_retry(
+                client.table("technologies")
+                .select("*")
+                .eq("scan_id", scan_id)
+                .order("created_at")
+                .execute
+            ),
+            execute_with_clock_skew_retry(
+                client.table("scan_check_results")
+                .select("*")
+                .eq("scan_id", scan_id)
+                .order("created_at")
+                .execute
+            ),
         )
     )

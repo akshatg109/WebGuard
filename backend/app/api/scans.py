@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import time
+import traceback
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -162,17 +163,32 @@ def _log_persistence_failure(operation: str, error: Exception) -> None:
         if isinstance(raw_code, str) and _SAFE_DATABASE_ERROR_CODE.fullmatch(raw_code)
         else "unavailable"
     )
+    if status == "unavailable" and code == "PGRST303":
+        status = 401
 
-    # Keep generic exception details useful for local diagnosis, but never log
-    # PostgREST details/hints or an unfiltered exception string.
-    raw_message = error.message if isinstance(error, PostgrestAPIError) else str(error)
+    # Only log PostgREST's structured message. Generic exception text can contain
+    # scanned-site evidence, including cookie values, so log its type/status only.
+    try:
+        raw_message = getattr(error, "message", None) if isinstance(error, PostgrestAPIError) else None
+    except Exception:
+        raw_message = None
     message = _safe_diagnostic_text(raw_message) if isinstance(raw_message, str) else ""
+    failure_site = "unavailable"
+    try:
+        frames = traceback.extract_tb(error.__traceback__)
+        if frames:
+            frame = frames[-1]
+            filename = frame.filename.rsplit("/", 1)[-1]
+            failure_site = f"{filename}:{frame.name}:{frame.lineno}"
+    except Exception:
+        pass
 
     _LOGGER.error(
         "Scan persistence failed "
-        "(operation=%s, exception_type=%s, upstream_status=%s, database_code=%s, message=%s)",
+        "(operation=%s, exception_type=%s, failure_site=%s, upstream_status=%s, database_code=%s, message=%s)",
         operation,
         type(error).__name__,
+        failure_site,
         status,
         code,
         message or "unavailable",
@@ -235,9 +251,15 @@ async def create_scan(
     display_url = safe_url(target.normalized_url)
     try:
         scan_row = await repository.create_pending(user.id, display_url)
-        scan_id = str(UUID(str(scan_row["id"])))
     except Exception as exc:
         _log_persistence_failure("create_pending", exc)
+        raise ApiError(503, "persistence_failure", "The scan could not be started right now.") from None
+    try:
+        if not isinstance(scan_row, Mapping) or scan_row.get("id") is None:
+            raise RuntimeError("Scan creation returned no valid row identifier.")
+        scan_id = str(UUID(str(scan_row["id"])))
+    except Exception as exc:
+        _log_persistence_failure("validate_pending_response", exc)
         raise ApiError(503, "persistence_failure", "The scan could not be started right now.") from None
 
     started = time.monotonic()

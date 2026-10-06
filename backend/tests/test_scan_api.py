@@ -376,6 +376,26 @@ class ScanApiTests(unittest.TestCase):
         self.assertNotIn("private diagnostic detail", log_output)
         self.assertNotIn("score_confidence", response.text)
 
+    def test_future_issued_jwt_diagnostic_records_postgrest_status(self) -> None:
+        class FutureJwtRepository(FakeRepository):
+            async def list_owned_summaries(self, user_id: str, *, limit: int, offset: int):
+                raise PostgrestAPIError(
+                    {"code": "PGRST303", "message": "JWT issued at future"}
+                )
+
+        with build_client(repository=FutureJwtRepository()) as client:
+            with self.assertLogs("app.api.scans", level="ERROR") as diagnostics:
+                response = client.get(
+                    "/api/scans",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        log_output = "\n".join(diagnostics.output)
+        self.assertIn("upstream_status=401", log_output)
+        self.assertIn("database_code=PGRST303", log_output)
+        self.assertIn("message=JWT issued at future", log_output)
+
     def test_scan_creation_logs_safe_pending_insert_failure_diagnostics(self) -> None:
         class BrokenCreateRepository(FakeRepository):
             async def create_pending(self, user_id: str, target_url: str):
@@ -411,6 +431,68 @@ class ScanApiTests(unittest.TestCase):
         self.assertNotIn("local-diagnostic-password", log_output)
         self.assertNotIn("private@db.example.test", log_output)
         self.assertNotIn("private insert detail", log_output)
+
+    def test_generic_persistence_exception_text_is_not_logged(self) -> None:
+        class BrokenCreateRepository(FakeRepository):
+            async def create_pending(self, user_id: str, target_url: str):
+                raise RuntimeError("Cookie=site-session-secret; BODY_SECRET=private")
+
+        with build_client(repository=BrokenCreateRepository()) as client:
+            with self.assertLogs("app.api.scans", level="ERROR") as diagnostics:
+                response = client.post(
+                    "/api/scans",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={"url": VALID_URL},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        log_output = "\n".join(diagnostics.output)
+        self.assertIn("operation=create_pending", log_output)
+        self.assertIn("exception_type=RuntimeError", log_output)
+        self.assertIn("message=unavailable", log_output)
+        self.assertNotIn("site-session-secret", log_output)
+        self.assertNotIn("private", log_output)
+
+    def test_attribute_error_diagnostic_includes_safe_failure_site(self) -> None:
+        class BrokenCreateRepository(FakeRepository):
+            async def create_pending(self, user_id: str, target_url: str):
+                raise AttributeError("Cookie=must-not-be-logged")
+
+        with build_client(repository=BrokenCreateRepository()) as client:
+            with self.assertLogs("app.api.scans", level="ERROR") as diagnostics:
+                response = client.post(
+                    "/api/scans",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={"url": VALID_URL},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        log_output = "\n".join(diagnostics.output)
+        self.assertIn("operation=create_pending", log_output)
+        self.assertIn("exception_type=AttributeError", log_output)
+        self.assertIn("failure_site=test_scan_api.py:create_pending", log_output)
+        self.assertIn("message=unavailable", log_output)
+        self.assertNotIn("must-not-be-logged", log_output)
+
+    def test_invalid_pending_response_has_separate_safe_diagnostic_stage(self) -> None:
+        class InvalidResponseRepository(FakeRepository):
+            async def create_pending(self, user_id: str, target_url: str):
+                return {"id": "not-a-uuid"}
+
+        scanner = FakeScanner()
+        with build_client(repository=InvalidResponseRepository(), scanner=scanner) as client:
+            with self.assertLogs("app.api.scans", level="ERROR") as diagnostics:
+                response = client.post(
+                    "/api/scans",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={"url": VALID_URL},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(scanner.calls, [])
+        log_output = "\n".join(diagnostics.output)
+        self.assertIn("operation=validate_pending_response", log_output)
+        self.assertIn("exception_type=ValueError", log_output)
 
     def test_scan_routes_require_the_server_only_service_credential(self) -> None:
         with build_client() as client:
@@ -525,6 +607,38 @@ class ScanApiTests(unittest.TestCase):
         self.assertEqual(len(repository.children[result["id"]]["technologies"]), 2)
         self.assertEqual(len(repository.children[result["id"]]["check_results"]), 13)
         self.assertEqual(result["target_url"], "https://fixture.example.com/page")
+
+    def test_scan_lifecycle_and_history_remain_authenticated_end_to_end(self) -> None:
+        scanner = FakeScanner()
+        repository = FakeRepository()
+        with build_client(scanner=scanner, repository=repository) as client:
+            unauthenticated_get = client.get("/api/scans")
+            unauthenticated_post = client.post(
+                "/api/scans", json={"url": "https://fixture.example.com/"}
+            )
+            before = client.get(
+                "/api/scans", headers={"Authorization": "Bearer valid-token"}
+            )
+            created = client.post(
+                "/api/scans",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"url": "https://fixture.example.com/"},
+            )
+            history = client.get(
+                "/api/scans", headers={"Authorization": "Bearer valid-token"}
+            )
+
+        self.assertEqual(unauthenticated_get.status_code, 401)
+        self.assertEqual(unauthenticated_post.status_code, 401)
+        self.assertEqual(before.status_code, 200)
+        self.assertEqual(before.json()["total"], 0)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["status"], "completed")
+        self.assertEqual(scanner.calls, ["https://fixture.example.com/"])
+        self.assertEqual(repository.events, ["pending", "running", "completed"])
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()["total"], 1)
+        self.assertEqual(history.json()["items"][0]["id"], created.json()["id"])
 
     def test_owned_scan_can_be_read_but_another_user_gets_not_found(self) -> None:
         repository = FakeRepository()
